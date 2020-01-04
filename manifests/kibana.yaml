@@ -1,0 +1,85 @@
+---
+# setting ConfigMap
+
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: kibana-conf
+  namespace: elkstackstack
+data:
+  kibana.yml: |
+    server.name: kibana
+    server.host: "0"
+    elasticsearch.hosts: [ "http://elasticsearch-loadbalancer:9200" ]
+    xpack.monitoring.ui.container.elasticsearch.enabled: true
+
+---
+# setting Depolyment
+apiVersion: apps/v1beta2
+kind: Deployment
+metadata:
+  name: kibana
+  namespace: elkstack
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kibana
+  template:
+    metadata:
+      labels:
+        app: kibana
+    spec:
+      volumes:
+      - name: config
+        configMap:
+          name: kibana-conf
+          items:
+            - key: kibana.yml
+              path: kibana.yml
+      - name: kibana-data
+        flexVolume:
+          driver: "alicloud/nas"
+          options:
+            server: "xxx.cn-hangzhou.nas.aliyuncs.com"
+            path: "/elk/kibana/"
+            vers: "3"
+            options: "nolock,tcp,noresvport"
+      containers:
+        - name: kibana
+          image: docker.elastic.co/elasticsearch/kibana:7.3.0
+          imagePullPolicy: IfNotPresent
+          volumeMounts:
+          - name: config
+            mountPath: "/usr/share/kibana/config/kibana.yml"
+            subPath: kibana.yml
+          - name: kibana-data
+            mountPath: /usr/share/kibana/data
+          readinessProbe:
+            tcpSocket:
+              port: 5601
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 5601
+            initialDelaySeconds: 15
+            periodSeconds: 20
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kibana-nodeport
+  namespace: elkstack
+spec:
+  selector:
+    app: kibana
+  ports:
+    - name: http
+      port: 5601
+      protocol: TCP
+      targetPort: 5601
+      nodePort: 30002
+  sessionAffinity: None
+  type: NodePort

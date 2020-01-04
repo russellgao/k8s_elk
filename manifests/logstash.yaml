@@ -1,0 +1,140 @@
+---
+# setting Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: elkstack
+
+
+---
+# setting ConfigMap
+
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: logstash-conf
+  namespace: elkstack
+data:
+  logstash.conf: |
+    input {
+        http {
+            host => "0.0.0.0" # default: 0.0.0.0
+            port => 8080 # default: 8080
+            user => "logstash"
+            password => "aoDJ0JVgkfNPjarn"
+            response_headers => {
+                "Content-Type" => "text/plain"
+                "Access-Control-Allow-Origin" => "*"
+                "Access-Control-Allow-Methods" => "GET, POST, DELETE, PUT"
+                "Access-Control-Allow-Headers" => "authorization, content-type"
+                "Access-Control-Allow-Credentials" => true
+            }
+        }
+        kafka  {
+            topics => "golang_applog"
+            bootstrap_servers => "bootstrap-kafka:9092"
+            auto_offset_reset => "earliest"
+            group_id => "golang_applog_kafka_gr1"
+            consumer_threads => 3
+            codec => "json"
+        }
+    }
+    filter {
+
+    }
+    output {
+        if "_grokparsefailure" not in [tags] {
+            elasticsearch {
+                hosts => ["elasticsearch-loadbalancer:9200"]
+                index => "abc-%{+YYYY.MM.dd}"
+            }
+        }
+    }
+
+
+---
+
+apiVersion: apps/v1beta2
+kind: Deployment
+metadata:
+  name: logstash
+  namespace: elkstack
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: logstash-webapp
+  template:
+    metadata:
+      labels:
+        app: logstash-webapp
+    spec:
+      volumes:
+      - name: config
+        configMap:
+          name: logstash-conf
+      hostname: logstash
+      containers:
+        - name: logstash
+          image: docker.elastic.co/elasticsearch/logstash:7.3.0
+          args: [
+            "-f","/usr/share/logstash/pipeline/logstash.conf",
+          ]
+          imagePullPolicy: IfNotPresent
+          volumeMounts:
+          - name: config
+            mountPath: "/usr/share/logstash/pipeline/logstash.conf"
+            readOnly: true
+            subPath: logstash.conf
+          resources:
+            requests:
+              cpu: 1
+              memory: 2048Mi
+            limits:
+              cpu: 2
+              memory: 3072Mi
+          readinessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 20
+
+---
+apiVersion: autoscaling/v2beta1
+kind: HorizontalPodAutoscaler
+metadata:
+  name: logstash-hpa
+  namespace: elkstack
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1beta2
+    kind: Deployment
+    name: logstash
+  minReplicas: 2
+  maxReplicas: 4
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      targetAverageUtilization: 90
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: logstash-custerip
+  namespace: elkstack
+spec:
+  selector:
+    app: logstash-webapp
+  type: ClusterIP
+  ports:
+    - name: 'port'
+      protocol: TCP
+      port: 8080
+      targetPort: 8080

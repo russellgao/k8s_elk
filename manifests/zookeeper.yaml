@@ -1,0 +1,204 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: elkstack
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: zookeeper-config
+  namespace: elkstack
+data:
+  ZOO_USER: zookeeper
+  ZOO_CONF_DIR: /conf
+  ZOO_DATA_DIR: /data
+  ZOO_DATA_LOG_DIR: /datalog
+  ZOO_LOG_DIR: /logs
+  ZOO_PORT: "2181"
+  ZOO_TICK_TIME: "2000"
+  ZOO_INIT_LIMIT: "10"
+  ZOO_SYNC_LIMIT: "10"
+  ZOO_STANDALONE_ENABLED: "true"
+  ZOO_AUTOPURGE_PURGEINTERVAL: "24"
+  ZOO_AUTOPURGE_SNAPRETAINCOUNT: "100"
+  ZOO_MAX_CLIENT_CNXNS: "300"
+  ZOO_LOG4J_PROP: "INFO,ROLLINGFILE"
+
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: alicloud-nas-zookeeper
+mountOptions:
+  - nolock,tcp,noresvport
+  - vers=3
+parameters:
+  server: "xxx.cn-hangzhou.nas.aliyuncs.com:/elk/zookeeper/"
+  driver: flexvolume
+provisioner: alicloud/nas
+reclaimPolicy: Retain
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: zookeeper
+  namespace: elkstack
+spec:
+  serviceName: zookeeper-cluster
+  replicas: 1
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app: zookeeper-cluster
+  template:
+    metadata:
+      labels:
+        app: zookeeper-cluster
+    spec:
+      containers:
+        - name: zookeeper
+          resources:
+            requests:
+              cpu: 10m
+              memory: 100Mi
+            limits:
+              memory: 200Mi
+          image: zookeeper
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: ZOO_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: zookeeper-config
+                  key: ZOO_USER
+            - name: ZOO_CONF_DIR
+              valueFrom:
+                configMapKeyRef:
+                  name: zookeeper-config
+                  key: ZOO_CONF_DIR
+            - name: ZOO_DATA_DIR
+              valueFrom:
+                configMapKeyRef:
+                  name: zookeeper-config
+                  key: ZOO_DATA_DIR
+            - name: ZOO_DATA_LOG_DIR
+              valueFrom:
+                configMapKeyRef:
+                  name: zookeeper-config
+                  key: ZOO_DATA_LOG_DIR
+            - name: ZOO_LOG_DIR
+              valueFrom:
+                configMapKeyRef:
+                  name: zookeeper-config
+                  key: ZOO_LOG_DIR
+            - name: ZOO_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: zookeeper-config
+                  key: ZOO_PORT
+            - name: ZOO_TICK_TIME
+              valueFrom:
+                configMapKeyRef:
+                  name: zookeeper-config
+                  key: ZOO_TICK_TIME
+            - name: ZOO_INIT_LIMIT
+              valueFrom:
+                configMapKeyRef:
+                  name: zookeeper-config
+                  key: ZOO_INIT_LIMIT
+            - name: ZOO_SYNC_LIMIT
+              valueFrom:
+                configMapKeyRef:
+                  name: zookeeper-config
+                  key: ZOO_SYNC_LIMIT
+            - name: ZOO_STANDALONE_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: zookeeper-config
+                  key: ZOO_STANDALONE_ENABLED
+            - name: ZOO_AUTOPURGE_PURGEINTERVAL
+              valueFrom:
+                configMapKeyRef:
+                  name: zookeeper-config
+                  key: ZOO_AUTOPURGE_PURGEINTERVAL
+            - name: ZOO_AUTOPURGE_SNAPRETAINCOUNT
+              valueFrom:
+                configMapKeyRef:
+                  name: zookeeper-config
+                  key: ZOO_AUTOPURGE_SNAPRETAINCOUNT
+            - name: ZOO_MAX_CLIENT_CNXNS
+              valueFrom:
+                configMapKeyRef:
+                  name: zookeeper-config
+                  key: ZOO_MAX_CLIENT_CNXNS
+            - name: ZOO_LOG4J_PROP
+              valueFrom:
+                configMapKeyRef:
+                  name: zookeeper-config
+                  key: ZOO_LOG4J_PROP
+          readinessProbe:
+            tcpSocket:
+              port: 2181
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 2181
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          ports:
+            - containerPort: 2181
+              name: zk-client
+          volumeMounts:
+            - name: zookeeper-data
+              mountPath: /data
+            - name: zookeeper-datalog
+              mountPath: /datalog
+            - name: zookeeper-logs
+              mountPath: /logs
+  volumeClaimTemplates:
+    - metadata:
+        name: zookeeper-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: alicloud-nas-zookeeper
+        resources:
+          requests:
+            storage: 30Gi
+    - metadata:
+        name: zookeeper-datalog
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: alicloud-nas-zookeeper
+        resources:
+          requests:
+            storage: 10Gi
+    - metadata:
+        name: zookeeper-logs
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: alicloud-nas-zookeeper
+        resources:
+          requests:
+            storage: 10Gi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zookeeper-cluster
+  namespace: elkstack
+spec:
+  selector:
+    app: zookeeper-cluster
+  ports:
+    - name: http
+      port: 2181
+      targetPort: 2181
+  sessionAffinity: None
+  type: ClusterIP
+
