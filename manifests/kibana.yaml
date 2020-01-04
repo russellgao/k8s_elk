@@ -5,7 +5,7 @@ kind: ConfigMap
 apiVersion: v1
 metadata:
   name: kibana-conf
-  namespace: elkstackstack
+  namespace: elkstack
 data:
   kibana.yml: |
     server.name: kibana
